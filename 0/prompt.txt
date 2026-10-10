@@ -1,0 +1,97 @@
+<pasted_content id="874c">
+# Task: implement the six agents in `agents/` (zod-typed, traced, versioned)
+
+## Read first
+- Read `agents/types.ts`, every file in `lib/clients/`, `lib/clients/callTool.ts`, `lib/env.ts`,
+  `prisma/schema.prisma`, and the LLD in `docs/` (if present) BEFORE writing anything.
+- Design input/output zod schemas to fit the existing types and clients. Reuse existing types;
+  do not duplicate them.
+
+## Global rules (apply to every agent)
+1. Each agent lives in `agents/<name>/` with:
+   - `schema.ts`  — zod `InputSchema` and `OutputSchema`; export inferred TS types.
+   - `prompt.ts`  — the system prompt as an exported constant, plus a `PROMPT_VERSION` string.
+   - `index.ts`   — `export async function run<Name>(input, ctx): Promise<Output>`.
+   - `<name>.test.ts` — unit tests with mocked clients.
+2. Validate input with `InputSchema.parse` at entry and output with `OutputSchema.parse` before
+   returning. Never return unvalidated data.
+3. All LLM calls go through `lib/clients/llm.ts` (`complete` / `extract`). All external data
+   through `lib/clients/*` via `callTool`. No vendor SDK imports in `agents/`.
+4. Wrap the whole agent and each LLM/tool call in a neatlogs span from `lib/clients/trace.ts`.
+   Span attributes: agent name, PROMPT_VERSION, run version (v1|v2), counts (claims, sources).
+5. Every agent accepts `ctx.version: "v1" | "v2"`. Implement BOTH behaviours where noted below.
+   v1 is intentionally naive (it is the "before" in our before/after story); v2 is the fix.
+6. Failure policy: never throw to the orchestrator. On failure return a valid output with
+   `status: "failed"` or `"unverifiable"` and a short `reason`. Log the error in the span.
+7. No investment advice. Outputs must never contain "buy", "sell", "strong", "guaranteed",
+   price targets or recommendations. Add a test that scans outputs for these words.
+8. Numbers are computed in code, never written by the LLM (see extractor).
+9. Every factual claim in any output carries `sourceIds` pointing at stored `Source` rows.
+10. Keep system prompts short, concrete and versioned. Each must state: role, the exact task,
+    what inputs mean, the output contract (fields + allowed values), hard rules, and what to do
+    when evidence is missing ("mark unverifiable; never guess").
+
+## Agents
+
+### 1. resolver — free text → one canonical entity
+- Input: user query, optional country hint. Output: ranked candidates (legal name, country,
+  status unlisted|ipo_filed|listed, domain?, ticker/symbols?, cik?, filingUrl?, confidence 0–1),
+  plus `needsUserChoice` and a short `question` when ambiguous.
+- Chain (stop when top confidence ≥ 0.85 and runner-up is ≥ 0.15 behind):
+  local tables → wikidata → serp (organic + knowledgeGraph; aiOverview only as a lead) →
+  crustdata enrich to confirm domain → company site via firecrawl.
+- Two independent sources agreeing on domain or legal name: +0.1 each.
+- Intent "IPO" ranks unlisted/ipo_filed above listed.
+- LLM role: extract candidate names/domains from snippets and pick among candidates.
+  It must not invent a ticker, CIK or domain that no source returned.
+- v1: search the raw query, take the first plausible result, never ask the user.
+- v2: full chain + ambiguity question.
+- Tests: "Jio" with mocked data returns needsUserChoice=true (listed Jio Financial vs unlisted Jio Platforms).
+
+### 2. router — entity → instrument + country pack
+- Input: resolved entity + original query. Output: instrument (ipo|unlisted|listed|mf|etf),
+  country (IN|US|OTHER), `supported: boolean`, reason.
+- Deterministic rules first (status + country); LLM only for genuinely unclear cases.
+- Supported in this build: IN ipo, IN unlisted, US ipo. Others → supported=false with reason.
+
+### 3. planner — instrument + country → checks to run
+- Input: router output + entity. Output: ordered list of check ids from the country pack,
+  each with `tools` it will use, plus the union of tools as `declaredIntent` (used by ArmorIQ later).
+- Pure code from the pack's checklist; LLM only to skip checks clearly impossible for this entity
+  (e.g. no DRHP filed), with a stated reason.
+
+### 4. extractor — sources → structured facts (per check)
+- Input: check id, entity, fetched source texts (already stored as `Source` rows, with ids).
+  Output: typed fields for that check (e.g. price band, share count, revenue by year,
+  OFS vs fresh issue split, headcount trend), each with `sourceIds`, plus `missing: string[]`.
+- Use `llm.extract` with a per-check zod schema. Then pass extracted numbers to `compute/`
+  (market cap, P/E, P/S, OFS %, lock-in dates). Computed values carry the input sourceIds.
+- Long filings: only pass the sections returned by `extractSections`, never a whole PDF.
+- v1: let the LLM state the valuation directly (no compute).
+- v2: LLM extracts inputs only; code computes.
+
+### 5. verifier — claims → verdicts
+- Input: all claims from extractor outputs + their sources + resolved entity.
+  Output: each claim marked supported|contradicted|unsupported with reason, plus run-level
+  counts and a list of conflicts (claim, source A says, source B says, which wins and why).
+- Rules (v2): every claim needs a source; company's own site/press release cannot alone
+  confirm its own claim; syndicated copies count once; primary > regulator > company > news >
+  aiOverview; reject sources that don't name the resolved legal name or domain;
+  financial figures older than the latest reported period are flagged stale.
+- LLM role: judge whether a source passage actually states the claim (quote the span).
+- v1: accept any claim that has any source, including aiOverview and the company's own site.
+
+### 6. reporter — verdicts → final report
+- Input: entity, router output, findings, verifier output. Output: report object with
+  red flags (status=flag), key numbers with sources, per-check summaries, unverifiable list,
+  "questions to ask the seller/issuer", and the fixed disclaimer "Evidence, not advice."
+- Write ONLY from supported claims. A final self-check pass removes any sentence that has no
+  matching supported claim (v2). Missing data is stated plainly as unverifiable.
+- Plain language, short sentences, ₹ for India and $ for US.
+
+## Order and checkpoints
+Implement in order: resolver → router → planner → extractor → verifier → reporter.
+After each agent: run its tests, run it once against real clients on one India and one US
+example, show me the trimmed output and the neatlogs span, then commit with a clear message.
+If a client you need is still a stub (e.g. crustdata), mock it in tests and tell me.
+</pasted_content id="874c">
