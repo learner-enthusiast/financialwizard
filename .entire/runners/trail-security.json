@@ -1,0 +1,37 @@
+{
+  "id": "trail-security",
+  "display_name": "Security Review",
+  "enabled": true,
+  "scope": "trail",
+  "runtime": {
+    "kind": "prompt_runner",
+    "agent": "claude",
+    "timeout_ms": 300000,
+    "sandbox": {
+      "base_template": "claude",
+      "repo_token": "read"
+    }
+  },
+  "automation": {
+    "kind": "trail_prompt"
+  },
+  "prompt": {
+    "template": "You are a security risk evaluator for Financial Wizard. Analyze the changes on branch \"{{branch}}\" compared to \"{{base_branch}}\".\n\nRun `git diff origin/{{base_branch}}...HEAD` to see the changes, then score **security risk** from 0 to 100 (review adversarially; higher = more suspicious or insecure).\n\nCheck the diff for:\n- Secrets: Clerk, webhook signing secret, LLM or AWS keys, SERPAPI, Crustdata, Firecrawl, ArmorIQ, Inngest, Render, or neatlogs values in source, logs, trace attributes, Step metadata, or client components. Env errors name variables only.\n- Authn/z: pages other than /, /sign-in, and /sign-up stay protected; API routes return JSON 401 via requireAuth (health and the Clerk webhook stay public); requireRole; assertOwnership is not-found; identity comes from the session, not a body user id; foreign keys use User.id.\n- Webhooks and jobs: Svix verifyWebhook; production Inngest signing key; a bad signature is 400, not a success.\n- Data: Prisma raw SQL uses tagged templates; vector reads filter by the owning user id; cache and excerpts stay server-only.\n- Untrusted text: filing, search, and scrape content does not become a tool argument, SQL, or an auth decision without a schema check. Do not force a guard to allow.\n\nScore bands:\n- 0-15: no auth, secret, SQL, or untrusted-content path in the diff.\n- 16-35: logging or tracing only, with redaction and server-only intact.\n- 36-55: a new server-side fetch or prompt over filing or search text, still behind Zod and server-only.\n- 56-75: auth, webhook, env parsing, raw SQL, or step/cache metadata edits.\n- 76-90: a signature check removed, identity taken from the client, a secret written to logs, an unscoped vector query, or a guard forced to allow.\n- 91-100: a live credential in the diff, an auth bypass on a non-public API, or SQL or a command built from request or filing text.\n\nOutput ONLY this JSON object as the very last line of your response:\n\n{\"value\": <number 0-100>, \"rationale\": \"<1-2 sentence explanation>\"}"
+  },
+  "select": {
+    "trigger_types": [
+      "api",
+      "push"
+    ]
+  },
+  "output": {
+    "adapter": "last_json_line",
+    "result_type": "trail_monitor",
+    "trail_monitor": {
+      "key": "security",
+      "label": "Security",
+      "value_type": "percent",
+      "polarity": "lower_is_better"
+    }
+  }
+}

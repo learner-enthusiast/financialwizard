@@ -1,0 +1,37 @@
+{
+  "id": "trail-drift",
+  "display_name": "Drift Eval",
+  "enabled": true,
+  "scope": "trail",
+  "runtime": {
+    "kind": "prompt_runner",
+    "agent": "claude",
+    "timeout_ms": 300000,
+    "sandbox": {
+      "base_template": "claude",
+      "repo_token": "read"
+    }
+  },
+  "automation": {
+    "kind": "trail_prompt"
+  },
+  "prompt": {
+    "template": "You are a drift evaluator for Financial Wizard. Analyze the changes on branch \"{{branch}}\" compared to \"{{base_branch}}\".\n\nRun `git diff origin/{{base_branch}}...HEAD` to see the changes, then score **drift** from 0 to 100 (higher = more deviation from this repo's layers and research pipeline).\n\nScore against these patterns:\n- Layers: proxy.ts and middleware do not query the DB. Route handlers validate input, call requireAuth, and call services. Services throw ApiError and do not import Prisma or NextResponse. Only repositories import Prisma. Only lib/clients calls vendor SDKs. schemas/ do not import server-only. hooks/ do not import Prisma or repositories.\n- Agents: Zod schemas in agents/<name>/schema.ts are the source of truth. Agents return status ok, unverifiable, or failed. Order is resolver, router, planner, extractor, verifier, reporter. The model extracts; compute/ does the arithmetic. Prompts are versioned constants.\n- Clients: start with server-only; credentials come from lib/env.ts; SDKs are created lazily; responses are Zod-checked; failures become ApiError RATE_LIMITED or UPSTREAM_ERROR without provider text in message. Vendor calls go through callTool (cache, budget, retries, Step row, trace).\n\nScore bands:\n- 0-15: matches those layers, Zod contracts, and callTool.\n- 16-40: naming or prompt wording drifts inside the same layer and contract.\n- 41-65: a new fetch, agent, or job step skips callTool, source recording, or schema re-validation.\n- 66-85: a handler or service queries Prisma or a vendor SDK; a client component imports server-only code; the model emits computed metrics.\n- 86-100: a second auth, data-access, or research loop ignores the layers above.\n\nOutput ONLY this JSON object as the very last line of your response:\n\n{\"value\": <number 0-100>, \"rationale\": \"<1-2 sentence explanation>\"}"
+  },
+  "select": {
+    "trigger_types": [
+      "api",
+      "push"
+    ]
+  },
+  "output": {
+    "adapter": "last_json_line",
+    "result_type": "trail_monitor",
+    "trail_monitor": {
+      "key": "drift",
+      "label": "Drift",
+      "value_type": "percent",
+      "polarity": "lower_is_better"
+    }
+  }
+}

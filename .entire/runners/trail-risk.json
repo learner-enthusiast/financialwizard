@@ -1,0 +1,37 @@
+{
+  "id": "trail-risk",
+  "display_name": "Risk Eval",
+  "enabled": true,
+  "scope": "trail",
+  "runtime": {
+    "kind": "prompt_runner",
+    "agent": "claude",
+    "timeout_ms": 300000,
+    "sandbox": {
+      "base_template": "claude",
+      "repo_token": "read"
+    }
+  },
+  "automation": {
+    "kind": "trail_prompt"
+  },
+  "prompt": {
+    "template": "You are a risk evaluator for Financial Wizard, a pre-purchase research app over filings, price bands, and valuations. Analyze the changes on branch \"{{branch}}\" compared to \"{{base_branch}}\".\n\nRun `git diff origin/{{base_branch}}...HEAD` to see the changes, then score **risk** from 0 to 100 (higher = more potential damage if something is wrong). Weight a wrong valuation or the wrong legal entity far above UI copy.\n\nDimensions:\n- Buyer-facing numbers: price band, fresh issue vs offer-for-sale, market cap, P/E, P/S, lock-in end, revenue growth, headcount change.\n- Identity: legal name, country IN/US/OTHER, listed vs ipo_filed vs unlisted, CIK, exchange symbol, parent vs subsidiary.\n- Evidence gate: source kinds, citation rules, verifier stance, reporter restating only claims.\n- User data: the User row, Clerk sync, soft-delete, ownership, prisma migrations.\n- Spend: budgets and retries for crustdata, serp, firecrawl, and llm.\n\nScore bands:\n- 0-15: docs, styles, or tests that cannot change a number, an entity, or a user row.\n- 16-35: logging, tracing, or an isolated client with no claim or auth effect.\n- 36-55: prompt or schema edits that still require citations and the verifier.\n- 56-75: compute/, extractor scales, source classification, callTool cache or budget, or prisma models User, Source, Step, or CacheEntry.\n- 76-90: resolver identity, verifier rules, reporter figures, auth, webhook, or user-scoped queries.\n- 91-100: a wrong or uncited valuation can ship, two companies can be merged, or user or PII rows can be overwritten or deleted.\n\nOutput ONLY this JSON object as the very last line of your response:\n\n{\"value\": <number 0-100>, \"rationale\": \"<1-2 sentence explanation>\"}"
+  },
+  "select": {
+    "trigger_types": [
+      "api",
+      "push"
+    ]
+  },
+  "output": {
+    "adapter": "last_json_line",
+    "result_type": "trail_monitor",
+    "trail_monitor": {
+      "key": "risk",
+      "label": "Risk",
+      "value_type": "percent",
+      "polarity": "lower_is_better"
+    }
+  }
+}

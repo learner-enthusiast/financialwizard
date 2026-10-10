@@ -1,0 +1,37 @@
+{
+  "id": "trail-confidence",
+  "display_name": "Confidence Eval",
+  "enabled": true,
+  "scope": "trail",
+  "runtime": {
+    "kind": "prompt_runner",
+    "agent": "claude",
+    "timeout_ms": 300000,
+    "sandbox": {
+      "base_template": "claude",
+      "repo_token": "read"
+    }
+  },
+  "automation": {
+    "kind": "trail_prompt"
+  },
+  "prompt": {
+    "template": "You are a confidence evaluator for Financial Wizard, a Next.js pre-purchase research app (Clerk auth, Prisma, a filings research pipeline). Analyze the changes on branch \"{{branch}}\" compared to \"{{base_branch}}\".\n\nRun `git diff origin/{{base_branch}}...HEAD` to see the changes, then score **confidence** from 0 to 100 (higher = more confident the changes are correct and well-tested).\n\nDimensions (weight money, identity, and auth above UI copy):\n- Evidence: claims still cite stored Source ids; AI_OVERVIEW is never sufficient evidence; reporter numbers appear in the cited claims; compute/ metrics keep inputClaimIds and the union of input sourceIds.\n- Arithmetic: lakh/crore/million/billion scales, price band, market cap, P/E, OFS percent, lock-in dates, and revenue growth have tests when a formula or FieldKind changes. v1 stays the naive path; v2 stays the checked path.\n- Identity: resolver does not invent a ticker, CIK, domain, country, or status; parent and subsidiary stay distinct; CIK stays 10 digits.\n- Auth and sync: webhook signature check, soft-deleted users not resurrected, role and baseCurrency not overwritten by Clerk sync, requireAuth/assertOwnership, foreign keys use User.id rather than clerkId.\n- Tests: Vitest covers the changed agent, client, repository, or webhook. Prompt text and the Zod schema still agree.\n\nScore bands:\n- 85-100: docs, styling, or tests that lock an existing invariant; no untested behavior change.\n- 60-84: behavior change in agents, compute, or clients with tests on the affected claim, scale, budget, or auth path.\n- 35-59: prompt, schema, callTool, or prisma change with partial tests, or a prompt/schema mismatch.\n- 10-34: auth, webhook, env, money math, or citation change with no test.\n- 0-9: the diff can emit an uncited figure, mix two companies, or drop a v2 check, and nothing in the diff asserts otherwise.\n\nOutput ONLY this JSON object as the very last line of your response:\n\n{\"value\": <number 0-100>, \"rationale\": \"<1-2 sentence explanation>\"}"
+  },
+  "select": {
+    "trigger_types": [
+      "api",
+      "push"
+    ]
+  },
+  "output": {
+    "adapter": "last_json_line",
+    "result_type": "trail_monitor",
+    "trail_monitor": {
+      "key": "confidence",
+      "label": "Confidence",
+      "value_type": "percent",
+      "polarity": "higher_is_better"
+    }
+  }
+}
