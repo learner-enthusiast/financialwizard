@@ -1,5 +1,6 @@
 import "server-only"
 
+import { detectIntent } from "@/agents/shared/intent"
 import { llmExtract } from "@/agents/shared/llm"
 import { normalizeLegalName, textNamesEntity } from "@/agents/shared/names"
 import { runAgent } from "@/agents/shared/run-agent"
@@ -74,9 +75,7 @@ type State = {
 // Matching and scoring (pure)
 // ---------------------------------------------------------------------------
 
-export function detectIntent(query: string): Intent {
-  return /\b(ipo|drhp|rhp|s-1|listing|pre-ipo)\b/i.test(query) ? "ipo" : "any"
-}
+export { detectIntent }
 
 /** Strips intent words so "Jio IPO" searches local tables for "jio". */
 function coreQuery(query: string): string {
