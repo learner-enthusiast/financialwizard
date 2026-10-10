@@ -49,21 +49,27 @@ export function initTracing(): Promise<void> {
   return initPromise
 }
 
+/** Sets attributes on the active span (e.g. result counts known only at the end). */
+export type SetSpanAttributes = (attrs: SpanAttributes) => void
+
 /**
- * Runs `fn` inside a named span (documented `trace()` API). Attributes are set
- * on the span before `fn` runs. Errors propagate unchanged (and are recorded
- * by the SDK).
+ * Runs `fn` inside a named span (documented `trace()` API). `attrs` are set
+ * before `fn` runs; `fn` may add more via its `setAttributes` argument.
+ * Errors propagate unchanged (and are recorded by the SDK).
  */
 export async function span<T>(
   name: string,
-  fn: () => Promise<T>,
+  fn: (setAttributes: SetSpanAttributes) => Promise<T>,
   attrs?: SpanAttributes,
   kind?: TraceSpanKind
 ): Promise<T> {
   await initTracing()
   return trace({ name, ...(kind ? { kind } : {}) }, async (active: ActiveSpan) => {
-    for (const [key, value] of Object.entries(attrs ?? {})) active.setAttribute(key, value)
-    return fn()
+    const setAttributes: SetSpanAttributes = (more) => {
+      for (const [key, value] of Object.entries(more)) active.setAttribute(key, value)
+    }
+    setAttributes(attrs ?? {})
+    return fn(setAttributes)
   })
 }
 

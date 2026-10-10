@@ -123,15 +123,18 @@ function toolInputSchema<T extends z.ZodType>(schema: T): Tool.InputSchema {
 async function bedrockExtract<T extends z.ZodType>(
   text: string,
   schema: T,
-  signal?: AbortSignal
+  opts: ExtractOptions
 ): Promise<z.infer<T> | null> {
-  const basePrompt = `Extract structured data from the following text:\n\n${text}`
+  const { system, signal } = opts
+  const maxTokens = opts.maxTokens ?? 4096
+  const basePrompt = extractPrompt(text, system)
 
   try {
     const message = await bedrockMantle().messages.parse(
       {
         model: modelId(),
-        max_tokens: 4096,
+        max_tokens: maxTokens,
+        system: system ?? undefined,
         messages: [{ role: "user", content: basePrompt }],
         output_config: { format: zodOutputFormat(schema) },
       },
@@ -151,7 +154,8 @@ async function bedrockExtract<T extends z.ZodType>(
     const message = await bedrockMantle().messages.create(
       {
         model: modelId(),
-        max_tokens: 4096,
+        max_tokens: maxTokens,
+        system: system ?? undefined,
         messages: [{ role: "user", content: prompt }],
         tools: [
           {
@@ -191,19 +195,33 @@ async function bedrockExtract<T extends z.ZodType>(
   return null
 }
 
+export type ExtractOptions = {
+  /** System prompt (role, task, output contract). Without it a generic instruction is used. */
+  system?: string
+  maxTokens?: number
+  signal?: AbortSignal
+}
+
+function extractPrompt(text: string, system?: string): string {
+  return system ? text : `Extract structured data from the following text:\n\n${text}`
+}
+
 export async function extract<T extends z.ZodType>(
   text: string,
   schema: T,
-  signal?: AbortSignal
+  opts: ExtractOptions = {}
 ): Promise<z.infer<T> | null> {
+  const { system, signal } = opts
+  const maxTokens = opts.maxTokens ?? 4096
   const provider = getLlmEnv().LLM_PROVIDER
-  const prompt = `Extract structured data from the following text:\n\n${text}`
+  const prompt = extractPrompt(text, system)
 
   if (provider === "anthropic") {
     const message = await getAnthropic().messages.parse(
       {
         model: modelId(),
-        max_tokens: 4096,
+        max_tokens: maxTokens,
+        system: system ?? undefined,
         messages: [{ role: "user", content: prompt }],
         output_config: { format: zodOutputFormat(schema) },
       },
@@ -217,7 +235,11 @@ export async function extract<T extends z.ZodType>(
     const response = await getOpenAI().responses.parse(
       {
         model: modelId(),
-        input: prompt,
+        max_output_tokens: maxTokens,
+        input: [
+          ...(system ? [{ role: "developer" as const, content: system }] : []),
+          { role: "user" as const, content: prompt },
+        ],
         text: { format: zodTextFormat(schema, "extract") },
       },
       { signal }
@@ -226,5 +248,5 @@ export async function extract<T extends z.ZodType>(
     return response.output_parsed as z.infer<T>
   }
 
-  return bedrockExtract(text, schema, signal)
+  return bedrockExtract(text, schema, { ...opts, maxTokens })
 }

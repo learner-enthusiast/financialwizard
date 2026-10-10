@@ -9,17 +9,14 @@ import { runReporter } from "@/agents/reporter"
 import { runResolver } from "@/agents/resolver"
 import { runRouter } from "@/agents/router"
 import { runVerifier } from "@/agents/verifier"
-import type { AgentContext } from "@/agents/types"
+import { createAgentContext, type AgentContext } from "@/agents/types"
 import { DEFAULT_TOOL_BUDGETS } from "@/lib/clients/callTool"
 import { inngest } from "@/inngest/client"
 
+// Stage inputs are wired by the orchestrator (not built yet); agents return
+// status "failed" with a reason for invalid input instead of throwing.
 function stubContext(runId: string): AgentContext {
-  return {
-    runId,
-    entity: { name: "stub" },
-    budget: { ...DEFAULT_TOOL_BUDGETS },
-    trace: { version: "v1", country: "US", instrument: "equity" },
-  }
+  return createAgentContext({ runId, version: "v2", budget: { ...DEFAULT_TOOL_BUDGETS } })
 }
 
 export const runResearch = inngest.createFunction(
@@ -37,12 +34,12 @@ export const runResearch = inngest.createFunction(
       }
     }
 
-    await step.run("resolver", () => safe(() => runResolver(ctx, {})))
-    await step.run("router", () => safe(() => runRouter(ctx, {})))
-    await step.run("planner", () => safe(() => runPlanner(ctx, {})))
-    await step.run("extractor", () => safe(() => runExtractor(ctx, {})))
-    await step.run("verifier", () => safe(() => runVerifier(ctx, {})))
-    await step.run("reporter", () => safe(() => runReporter(ctx, {})))
+    await step.run("resolver", () => safe(() => runResolver({}, ctx)))
+    await step.run("router", () => safe(() => runRouter({}, ctx)))
+    await step.run("planner", () => safe(() => runPlanner({}, ctx)))
+    await step.run("extractor", () => safe(() => runExtractor({}, ctx)))
+    await step.run("verifier", () => safe(() => runVerifier({}, ctx)))
+    await step.run("reporter", () => safe(() => runReporter({}, ctx)))
 
     return { runId, status: "stubbed" }
   }
