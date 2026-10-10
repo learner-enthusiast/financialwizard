@@ -24,6 +24,31 @@ async function listLocalPdfBasenames(): Promise<string[]> {
   }
 }
 
+/** Row of data/in-filings/companies.json (maintained by the owner). */
+export type KnownIndianCompany = {
+  legalName: string
+  status?: "unlisted" | "ipo_filed" | "listed"
+  domain?: string
+  nseSymbol?: string
+  bseCode?: string
+  drhpUrl?: string
+}
+
+/** Local company list for India (IPO / unlisted). Empty when the file is absent or invalid. */
+export async function listKnownCompanies(): Promise<KnownIndianCompany[]> {
+  try {
+    const raw = await readFile(path.join(process.cwd(), "data", "in-filings", "companies.json"), "utf8")
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter(
+      (row): row is KnownIndianCompany =>
+        typeof row === "object" && row !== null && typeof (row as KnownIndianCompany).legalName === "string"
+    )
+  } catch {
+    return []
+  }
+}
+
 export async function findDrhp(legalName: string, signal?: AbortSignal): Promise<Buffer | null> {
   const target = normalizeName(legalName)
   const pdfs = await listLocalPdfBasenames()

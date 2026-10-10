@@ -19,9 +19,9 @@ enum UserRole {
 /// the internal ID used by foreign keys plus application-managed data.
 model User {
   /// Internal ID. Other tables reference this, never `clerkId`.
-  id             String    @id @default(uuid(7)) @db.Uuid
+  id      String @id @default(uuid(7)) @db.Uuid
   /// Clerk user ID (`user_...`). Unique so concurrent syncs cannot duplicate.
-  clerkId        String    @unique @map("clerk_id")
+  clerkId String @unique @map("clerk_id")
 
   // ---- Synced from Clerk (overwritten on every sync) ----
   /// Primary verified email, or null when Clerk has none verified.
@@ -33,14 +33,14 @@ model User {
   clerkUpdatedAt DateTime? @map("clerk_updated_at")
 
   // ---- Application-managed (never touched by Clerk sync) ----
-  role           UserRole  @default(USER)
+  role         UserRole @default(USER)
   /// ISO 4217 currency code for reporting.
-  baseCurrency   String    @default("USD") @map("base_currency") @db.Char(3)
+  baseCurrency String   @default("USD") @map("base_currency") @db.Char(3)
 
   /// Soft-delete marker set when Clerk reports `user.deleted`.
-  deletedAt      DateTime? @map("deleted_at")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
   @@index([email])
   @@map("users")
@@ -71,4 +71,41 @@ model Step {
   @@index([runId, createdAt])
   @@index([tool, createdAt])
   @@map("steps")
+}
+
+enum SourceKind {
+  /// The filing itself (DRHP, RHP, S-1, 10-K)
+  PRIMARY
+  /// Regulator / exchange pages (sec.gov, sebi.gov.in, nseindia.com, bseindia.com)
+  REGULATOR
+  /// The entity's own website or press release
+  COMPANY
+  /// Data vendors / reference datasets (Wikidata, Crustdata, SEC ticker list)
+  REFERENCE
+  NEWS
+  /// Search-engine AI summaries: a lead only, never sufficient evidence
+  AI_OVERVIEW
+}
+
+/// Evidence fetched during a research run. Every claim cites Source ids.
+model Source {
+  id               String     @id @default(uuid(7)) @db.Uuid
+  runId            String     @map("run_id")
+  url              String
+  kind             SourceKind
+  publisher        String?
+  title            String?
+  /// Stored text the agents read (trimmed; never a whole filing).
+  excerpt          String
+  /// sha256 of normalized excerpt; identical hashes are syndicated copies.
+  contentHash      String     @map("content_hash")
+  /// Whether the excerpt names the resolved legal name or domain.
+  legalNameMatched Boolean    @default(false) @map("legal_name_matched")
+  publishedAt      DateTime?  @map("published_at")
+  fetchedAt        DateTime   @default(now()) @map("fetched_at")
+
+  @@unique([runId, url])
+  @@index([runId])
+  @@index([contentHash])
+  @@map("sources")
 }

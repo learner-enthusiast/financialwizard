@@ -12,12 +12,13 @@ export async function pdfToText(buffer: ArrayBuffer | Uint8Array): Promise<strin
   return text
 }
 
-export async function extractSections(
-  pdfBuffer: ArrayBuffer | Uint8Array,
-  headings: string[]
-): Promise<Record<string, string>> {
-  const full = await pdfToText(pdfBuffer)
-  const lower = full.toLowerCase()
+/**
+ * Slices `text` into the sections that start at each heading (case-insensitive),
+ * ending at the next heading found. Missing headings map to "".
+ * Works on already-extracted text (e.g. stored Source excerpts).
+ */
+export function sliceSections(text: string, headings: string[]): Record<string, string> {
+  const lower = text.toLowerCase()
   const out: Record<string, string> = {}
 
   for (let i = 0; i < headings.length; i++) {
@@ -28,12 +29,19 @@ export async function extractSections(
       continue
     }
     const nextStarts = headings
-      .slice(i + 1)
+      .filter((_, j) => j !== i)
       .map((h) => lower.indexOf(h.toLowerCase(), start + 1))
-      .filter((idx) => idx >= 0)
-    const end = nextStarts.length ? Math.min(...nextStarts) : full.length
-    out[heading] = full.slice(start, end).trim()
+      .filter((idx) => idx > start)
+    const end = nextStarts.length ? Math.min(...nextStarts) : text.length
+    out[heading] = text.slice(start, end).trim()
   }
 
   return out
+}
+
+export async function extractSections(
+  pdfBuffer: ArrayBuffer | Uint8Array,
+  headings: string[]
+): Promise<Record<string, string>> {
+  return sliceSections(await pdfToText(pdfBuffer), headings)
 }

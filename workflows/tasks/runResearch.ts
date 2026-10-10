@@ -11,16 +11,13 @@ import { runReporter } from "@/agents/reporter"
 import { runResolver } from "@/agents/resolver"
 import { runRouter } from "@/agents/router"
 import { runVerifier } from "@/agents/verifier"
-import type { AgentContext } from "@/agents/types"
+import { createAgentContext, type AgentContext } from "@/agents/types"
 import { DEFAULT_TOOL_BUDGETS } from "@/lib/clients/callTool"
 
+// Stage inputs are wired by the orchestrator (not built yet); agents return
+// status "failed" with a reason for invalid input instead of throwing.
 function stubContext(runId: string): AgentContext {
-  return {
-    runId,
-    entity: { name: "stub" },
-    budget: { ...DEFAULT_TOOL_BUDGETS },
-    trace: { version: "v1", country: "US", instrument: "equity" },
-  }
+  return createAgentContext({ runId, version: "v2", budget: { ...DEFAULT_TOOL_BUDGETS } })
 }
 
 async function safeAgent(fn: () => Promise<unknown>): Promise<{ ok: boolean }> {
@@ -33,27 +30,27 @@ async function safeAgent(fn: () => Promise<unknown>): Promise<{ ok: boolean }> {
 }
 
 export const runResolverStage = task({ name: "runResolverStage" }, async (_ctx, runId: string) =>
-  safeAgent(() => runResolver(stubContext(runId), {}))
+  safeAgent(() => runResolver({}, stubContext(runId)))
 )
 
 export const runRouterStage = task({ name: "runRouterStage" }, async (_ctx, runId: string) =>
-  safeAgent(() => runRouter(stubContext(runId), {}))
+  safeAgent(() => runRouter({}, stubContext(runId)))
 )
 
 export const runPlannerStage = task({ name: "runPlannerStage" }, async (_ctx, runId: string) =>
-  safeAgent(() => runPlanner(stubContext(runId), {}))
+  safeAgent(() => runPlanner({}, stubContext(runId)))
 )
 
 export const runExtractorStage = task({ name: "runExtractorStage" }, async (_ctx, runId: string) =>
-  safeAgent(() => runExtractor(stubContext(runId), {}))
+  safeAgent(() => runExtractor({}, stubContext(runId)))
 )
 
 export const runVerifierStage = task({ name: "runVerifierStage" }, async (_ctx, runId: string) =>
-  safeAgent(() => runVerifier(stubContext(runId), {}))
+  safeAgent(() => runVerifier({}, stubContext(runId)))
 )
 
 export const runReporterStage = task({ name: "runReporterStage" }, async (_ctx, runId: string) =>
-  safeAgent(() => runReporter(stubContext(runId), {}))
+  safeAgent(() => runReporter({}, stubContext(runId)))
 )
 
 export const runResearch = task(
