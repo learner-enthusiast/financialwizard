@@ -37,6 +37,18 @@ export const TOOL_TIMEOUT_MS: Record<CallToolName, number> = {
   pdf: 60_000,
 }
 
+/** Default cache TTL per tool (ms); overridable per call. */
+export const TOOL_CACHE_TTL_MS: Partial<Record<CallToolName, number>> = {
+  crustdata: 7 * 24 * 60 * 60 * 1000,
+}
+const DEFAULT_CACHE_TTL_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Lets a client attach per-call facts to the Step row (e.g. Crustdata's
+ * X-Credits-Used) without knowing about Prisma.
+ */
+export type StepReporter = (metadata: Record<string, unknown>) => void
+
 const RETRY_DELAYS_MS = [1000, 2000, 4000] as const
 
 function stableStringify(value: unknown): string {
@@ -116,7 +128,7 @@ async function writeStep(input: {
 export type CallToolOptions = {
   /** Skip cache read/write when true. */
   skipCache?: boolean
-  /** Cache TTL when writing (default 24h). Crustdata uses 7 days at the client layer. */
+  /** Cache TTL when writing (default: TOOL_CACHE_TTL_MS[tool] or 24h). */
   cacheTtlMs?: number
   signal?: AbortSignal
 }
@@ -129,11 +141,13 @@ export async function callTool<T>(
   run: CallToolRun,
   tool: CallToolName,
   args: unknown,
-  fn: (signal: AbortSignal) => Promise<T>,
+  fn: (signal: AbortSignal, report: StepReporter) => Promise<T>,
   options: CallToolOptions = {}
 ): Promise<T | null> {
   const cacheKey = cacheKeyFor(tool, args)
-  const cacheTtlMs = options.cacheTtlMs ?? 24 * 60 * 60 * 1000
+  const cacheTtlMs = options.cacheTtlMs ?? TOOL_CACHE_TTL_MS[tool] ?? DEFAULT_CACHE_TTL_MS
+  const reported: Record<string, unknown> = {}
+  const report: StepReporter = (metadata) => Object.assign(reported, metadata)
   const started = Date.now()
 
   const spanAttrs: SpanAttributes = {
@@ -186,11 +200,14 @@ export async function callTool<T>(
 
           const timer = setTimeout(() => controller.abort(new Error("timeout")), timeoutMs)
           try {
-            const result = await fn(controller.signal)
+            const result = await fn(controller.signal, report)
             clearTimeout(timer)
             linked?.removeEventListener("abort", onAbort)
 
-            if (!options.skipCache) {
+            // A null result is a non-retryable "nothing usable" (e.g. no credits,
+            // endpoint disabled). Never cache it.
+            const empty = result === null || result === undefined
+            if (!options.skipCache && !empty) {
               await writeCache(cacheKey, result, cacheTtlMs)
             }
 
@@ -198,11 +215,11 @@ export async function callTool<T>(
               runId: run.runId,
               tool,
               cacheKey,
-              status: "ok",
+              status: empty ? "empty" : "ok",
               durationMs: Date.now() - started,
-              metadata: { attempts: attempt + 1 },
+              metadata: { ...reported, attempts: attempt + 1 },
             })
-            return result
+            return empty ? null : result
           } catch (error) {
             clearTimeout(timer)
             linked?.removeEventListener("abort", onAbort)
@@ -219,6 +236,7 @@ export async function callTool<T>(
           status: "error",
           durationMs: Date.now() - started,
           metadata: {
+            ...reported,
             message: lastError instanceof Error ? lastError.message : String(lastError),
           },
         })

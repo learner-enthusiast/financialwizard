@@ -6,6 +6,7 @@ import { scanForAdvice } from "@/agents/shared/advice"
 import { searchTickers } from "@/lib/clients/edgar"
 import { scrapePage } from "@/lib/clients/firecrawl"
 import { listKnownCompanies } from "@/lib/clients/inFilings"
+import { identifyCompany } from "@/lib/clients/crustdata"
 import { extract } from "@/lib/clients/llm"
 import { search } from "@/lib/clients/serp"
 import { lookupCompany } from "@/lib/clients/wikidata"
@@ -20,8 +21,7 @@ vi.mock("@/lib/clients/wikidata", () => ({ lookupCompany: vi.fn() }))
 vi.mock("@/lib/clients/edgar", () => ({ searchTickers: vi.fn() }))
 vi.mock("@/lib/clients/inFilings", () => ({ listKnownCompanies: vi.fn() }))
 vi.mock("@/lib/clients/firecrawl", () => ({ scrapePage: vi.fn() }))
-// Crustdata is still a stub (docs/vendor/crustdata.md missing): mocked as unavailable.
-vi.mock("@/lib/clients/crustdata", () => ({ enrichCompany: vi.fn(async () => { throw new Error("blocked") }) }))
+vi.mock("@/lib/clients/crustdata", () => ({ identifyCompany: vi.fn(async () => []) }))
 
 const JIO_SERP = {
   organic: [
@@ -46,6 +46,7 @@ beforeEach(() => {
   vi.mocked(searchTickers).mockResolvedValue([])
   vi.mocked(lookupCompany).mockResolvedValue(null)
   vi.mocked(scrapePage).mockResolvedValue("")
+  vi.mocked(identifyCompany).mockResolvedValue([])
   vi.mocked(search).mockResolvedValue({ organic: [] })
   vi.mocked(extract).mockResolvedValue({ candidates: [] })
 })
@@ -107,6 +108,23 @@ describe("resolver v2", () => {
     expect(out.claims.map((c) => c.field)).toEqual(expect.arrayContaining(["legalName", "status", "cik"]))
     for (const claim of out.claims) expect(claim.sourceIds.length).toBeGreaterThan(0)
     expect(scrapePage).not.toHaveBeenCalled() // decided before the company-site step
+  })
+
+  it("uses free Crustdata identify to fill a missing domain when the legal name matches", async () => {
+    vi.mocked(search).mockResolvedValue({
+      organic: [{ title: "Acme Robotics Private Limited", link: "https://news.example/acme", snippet: "Acme Robotics Private Limited raised a round." }],
+    })
+    vi.mocked(extract).mockResolvedValue({
+      candidates: [{ legalName: "Acme Robotics Private Limited", domain: null, country: "IN", status: "unlisted", matchesQuery: "exact", resultIndexes: [0] }],
+    })
+    vi.mocked(identifyCompany).mockResolvedValue([
+      { confidenceScore: 0.97, company: { basic_info: { name: "Acme Robotics Pvt Ltd", primary_domain: "acmerobotics.in" } } },
+    ])
+
+    const out = await runResolver({ query: "Acme Robotics" }, testContext())
+
+    expect(identifyCompany).toHaveBeenCalledWith({ name: "Acme Robotics Private Limited" }, expect.objectContaining({ onUsage: expect.any(Function) }))
+    expect(out.candidates[0]!.domain).toBe("acmerobotics.in")
   })
 
   it("never keeps a domain that no cited result shows", async () => {

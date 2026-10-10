@@ -27,9 +27,23 @@ async function main() {
     return perRun.reduce((a, b) => a + b, 0) / count
   }
 
+  /** Sum of Crustdata X-Credits-Used recorded on Step rows, averaged per run. */
+  const avgCredits = () => {
+    const perRun = runs.map((rs) =>
+      rs
+        .filter((s) => s.tool === "crustdata")
+        .reduce((sum, s) => {
+          const used = (s.metadata as { creditsUsed?: unknown } | null)?.creditsUsed
+          return sum + (typeof used === "number" ? used : 0)
+        }, 0)
+    )
+    return perRun.reduce((a, b) => a + b, 0) / count
+  }
+
   const payload = {
     avgLlmCostPerRunUsd: null as number | null,
-    avgCrustdataCreditsPerRun: avg("crustdata"),
+    avgCrustdataCreditsPerRun: avgCredits(),
+    avgCrustdataCallsPerRun: avg("crustdata"),
     avgSerpCallsPerRun: avg("serp"),
     avgFirecrawlPagesPerRun: avg("firecrawl"),
     hostingPerMonthUsd: null as number | null,

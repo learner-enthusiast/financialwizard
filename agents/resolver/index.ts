@@ -2,7 +2,7 @@ import "server-only"
 
 import { detectIntent } from "@/agents/shared/intent"
 import { llmExtract } from "@/agents/shared/llm"
-import { normalizeLegalName, textNamesEntity } from "@/agents/shared/names"
+import { normalizeLegalName, sameCompanyName, textNamesEntity } from "@/agents/shared/names"
 import { runAgent } from "@/agents/shared/run-agent"
 import { classifyUrl, hostOf, normalizeDomain, recordSource } from "@/agents/shared/sources"
 import {
@@ -17,7 +17,7 @@ import {
 import { PROMPT_VERSION, SYSTEM_PROMPT } from "@/agents/resolver/prompt"
 import type { AgentContext, Claim, Country, Entity, EntityStatus, SourceRef } from "@/agents/types"
 import { callTool } from "@/lib/clients/callTool"
-import { enrichCompany } from "@/lib/clients/crustdata"
+import { identifyCompany } from "@/lib/clients/crustdata"
 import { searchTickers } from "@/lib/clients/edgar"
 import { scrapePage } from "@/lib/clients/firecrawl"
 import { listKnownCompanies } from "@/lib/clients/inFilings"
@@ -405,23 +405,43 @@ async function stepSearch(state: State): Promise<void> {
   }
 }
 
+/** Crustdata /company/identify (free) to confirm domain ↔ legal name. */
 async function stepCrustdata(state: State): Promise<void> {
   for (const scored of rank(state).slice(0, MAX_CONFIRMATIONS)) {
     const w = scored.working
     const target = w.domain ? { domain: w.domain } : { name: w.legalName }
-    // Field list left to the client default until docs/vendor/crustdata.md defines it.
-    const result = await callTool(state.ctx, "crustdata", { op: "enrich", target }, (signal) =>
-      enrichCompany(target, [], { signal })
+    const matches = await callTool(state.ctx, "crustdata", { op: "identify", target }, (signal, report) =>
+      identifyCompany(target, { signal, onUsage: report })
     )
-    if (result === null || result === undefined) continue
+    const top = (matches ?? []).slice(0, 3)
+    if (top.length === 0) continue
+
+    const lines = top.map(({ confidenceScore, company }) => {
+      const info = company.basic_info
+      return [
+        info?.name,
+        info?.primary_domain ? `domain ${info.primary_domain}` : undefined,
+        info?.company_type ?? undefined,
+        info?.year_founded ? `founded ${info.year_founded}` : undefined,
+        confidenceScore !== null ? `match confidence ${confidenceScore}` : undefined,
+      ]
+        .filter(Boolean)
+        .join("; ")
+    })
     state.sources.push(
       await recordSource(state.ctx, {
-        url: `crustdata:enrich:${encodeURIComponent(w.domain ?? w.legalName)}`,
+        url: `crustdata:identify:${encodeURIComponent(w.domain ?? w.legalName)}`,
         kind: "REFERENCE",
         publisher: "Crustdata",
-        text: JSON.stringify(result).slice(0, 8000),
+        text: lines.join("\n"),
       })
     )
+
+    // Fill a missing domain only when Crustdata's top match is the same legal name.
+    const best = top[0]!.company.basic_info
+    if (!w.domain && best?.name && best.primary_domain && sameCompanyName(best.name, w.legalName)) {
+      w.domain = normalizeDomain(best.primary_domain)
+    }
   }
 }
 

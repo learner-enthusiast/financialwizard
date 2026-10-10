@@ -25,9 +25,14 @@ export function traceMock() {
 export function callToolMock() {
   return {
     DEFAULT_TOOL_BUDGETS: { crustdata: 20, serp: 10, firecrawl: 15 },
-    callTool: async (_run: unknown, _tool: string, _args: unknown, fn: (signal: AbortSignal) => Promise<unknown>) => {
+    callTool: async (
+      _run: unknown,
+      _tool: string,
+      _args: unknown,
+      fn: (signal: AbortSignal, report: (metadata: Record<string, unknown>) => void) => Promise<unknown>
+    ) => {
       try {
-        return await fn(new AbortController().signal)
+        return (await fn(new AbortController().signal, () => undefined)) ?? null
       } catch {
         return null
       }
